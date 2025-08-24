@@ -14,77 +14,119 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
-#include <signal.h>
+#include <errno.h>
 
-#define NV 20			/* max number of command tokens */
-#define NL 100			/* input buffer size */
-char            line[NL];	/* command input buffer */
+#define NV 20
+#define NL 100
 
+char line[NL];
 
-/*
-	shell prompt
- */
+typedef struct {
+    int job_id;
+    pid_t pid;
+    char command[NL];
+} Job;
 
-void prompt(void)
-{
-  // ## REMOVE THIS 'fprintf' STATEMENT BEFORE SUBMISSION
-  fprintf(stdout, "\n msh> ");
-  fflush(stdout);
+Job jobs[100];
+int job_count = 0;
+int next_job_id = 1;
+
+void prompt(void) {
+    printf("\nmsh> ");
+    fflush(stdout);
 }
 
-
-/* argk - number of arguments */
-/* argv - argument vector from command line */
-/* envp - environment pointer */
-int main(int argk, char *argv[], char *envp[])
-{
-   int             frkRtnVal;	    /* value returned by fork sys call */
-  char           *v[NV];	        /* array of pointers to command line tokens */
-  char           *sep = " \t\n";  /* command line token separators    */
-  int             i;		          /* parse index */
-
-    /* prompt for and process one command line at a time  */
-
-  while (1) {			/* do Forever */
-    prompt();
-    fgets(line, NL, stdin);
-    fflush(stdin);
-
-    // This if() required for gradescope
-    if (feof(stdin)) {		/* non-zero on EOF  */
-      exit(0);
+void check_background_jobs(void) {
+    int status;
+    for (int i = 0; i < job_count; i++) {
+        if (jobs[i].pid != 0) {
+            pid_t r = waitpid(jobs[i].pid, &status, WNOHANG);
+            if (r > 0) {
+                printf("[%d]+ Done                 %s\n", jobs[i].job_id, jobs[i].command);
+                fflush(stdout);
+                jobs[i].pid = 0; // mark finished
+            }
+        }
     }
-    if (line[0] == '#' || line[0] == '\n' || line[0] == '\000'){
-      continue;			/* to prompt */
+}
+
+void build_command_string(char *dest, char *argv[]) {
+    dest[0] = '\0';
+    for (int i = 0; argv[i] != NULL; i++) {
+        strcat(dest, argv[i]);
+        if (argv[i+1] != NULL) strcat(dest, " ");
     }
+}
 
-    v[0] = strtok(line, sep);
-    for (i = 1; i < NV; i++) {
-      v[i] = strtok(NULL, sep);
-      if (v[i] == NULL){
-	      break;
-      }
+int main(int argk, char *argv[], char *envp[]) {
+    int frkRtnVal;
+    char *v[NV];
+    char *sep = " \t\n";
+    int i;
+
+    while (1) {
+        prompt();
+
+        if (fgets(line, NL, stdin) == NULL) {
+            if (feof(stdin)) exit(0);
+            continue;
+        }
+
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\0') {
+            check_background_jobs();
+            continue;
+        }
+
+        v[0] = strtok(line, sep);
+        for (i = 1; i < NV; i++) {
+            v[i] = strtok(NULL, sep);
+            if (v[i] == NULL) break;
+        }
+
+        if (v[0] == NULL) continue;
+
+        // built-in cd
+        if (strcmp(v[0], "cd") == 0) {
+            char *dir = v[1] ? v[1] : getenv("HOME");
+            if (chdir(dir) == -1) {
+                perror("cd");
+            }
+            check_background_jobs();
+            continue;
+        }
+
+        // check background
+        int background = 0;
+        if (i > 0 && v[i-1] && strcmp(v[i-1], "&") == 0) {
+            background = 1;
+            v[i-1] = NULL;
+        }
+
+        frkRtnVal = fork();
+        if (frkRtnVal < 0) {
+            perror("fork");
+            continue;
+        }
+
+        if (frkRtnVal == 0) { // child
+            execvp(v[0], v);
+            perror("execvp");
+            _exit(1);
+        } else { // parent
+            if (background) {
+                jobs[job_count].job_id = next_job_id++;
+                jobs[job_count].pid = frkRtnVal;
+                build_command_string(jobs[job_count].command, v);
+                printf("[%d] %d\n", jobs[job_count].job_id, frkRtnVal);
+                fflush(stdout);
+                job_count++;
+            } else {
+                if (waitpid(frkRtnVal, NULL, 0) == -1) {
+                    perror("waitpid");
+                }
+            }
+        }
+
+        check_background_jobs();
     }
-    /* assert i is number of tokens + 1 */
-
-    /* fork a child process to exec the command in v[0] */
-    switch (frkRtnVal = fork()) {
-      case -1:			/* fork returns error to parent process */
-      {
-	      break;
-      }
-      case 0:			/* code executed only by child process */
-      {
-	      execvp(v[0], v);
-      }
-      default:			/* code executed only by parent process */
-      {
-      	wait(0);
-        // REMOVE PRINTF STATEMENT BEFORE SUBMISSION
-        printf("%s done \n", v[0]);
-    	  break;
-      }
-    }				/* switch */
-  }				/* while */
-}				/* main */
-
+}
