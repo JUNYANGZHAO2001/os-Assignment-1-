@@ -87,17 +87,17 @@ int main(void) {
 
         if (!v[0]) continue;
 
-        /* built-in cd */
+        /* built-in cd handled in parent */
         if (strcmp(v[0], "cd") == 0) {
-            char *dir = v[1] ? v[1] : getenv("HOME");
+            char *dir = (v[1] != NULL) ? v[1] : getenv("HOME");
             if (chdir(dir) == -1) {
                 perror("cd");
             }
             check_background_jobs();
-            continue;
+            continue;  // skip fork/exec
         }
 
-        /* check background command */
+        /* check for background command */
         int background = 0;
         if (i > 0 && v[i-1] && strcmp(v[i-1], "&") == 0) {
             background = 1;
