@@ -123,12 +123,11 @@ int main(void) {
                 fflush(stdout);
                 job_count++;
             } else {
-                if (waitpid(pid, NULL, 0) == -1) {
-                    perror("waitpid");
-                }
+                if (waitpid(pid, NULL, 0) == -1) perror("waitpid");
             }
         }
 
         check_background_jobs();
     }
 }
+
